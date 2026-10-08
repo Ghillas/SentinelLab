@@ -1,5 +1,8 @@
 package com.passerelle;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
@@ -52,5 +55,40 @@ public class Passerelle {
         }
         long fin2 = System.currentTimeMillis();
         System.out.println("Temps double[] : " + (fin2 - debut2) + " ms");
+    
+
+
+    //================================================================ TP4
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("\n[Passerelle] Arrêt détecté, nettoyage et bilan mémoire :");
+            lireVmRSS();
+        }));
+
+        System.out.println("Passerelle Java active. En attente de trames... (Appuyez sur Ctrl+C pour quitter)");
+
+        // Boucle de simulation de la passerelle
+        try {
+            while (true) {
+                Thread.sleep(2000);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // Méthode pour lire l'utilisation mémoire RSS
+    private static void lireVmRSS() {
+        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/self/status"))) {
+            String ligne;
+            while ((ligne = reader.readLine()) != null) {
+                if (ligne.startsWith("VmRSS:")) {
+                    System.out.println("-> Consommation mémoire (VmRSS) : " + ligne.replaceAll("\\s+", " ").trim());
+                    return;
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Impossible de lire /proc/self/status (environnement non-Linux ?) : " + e.getMessage());
+        }
     }
 }

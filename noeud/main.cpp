@@ -1,116 +1,108 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <csignal>
+#include <atomic>
+#include <cstdint>
 #include <string>
-#include <cstdlib>
-#include "sim_sensor.hpp"
-#include "ring_buffer.hpp"
 
-
-
-enum class EtatNoeud {
-    Init,
-    LectureCapteur,
-    EnvoiDonnees,
-    ModePanne
+struct GpioRegs {                      // même disposition qu'un vrai périphérique
+    volatile uint32_t IDR;               // entrées
+    volatile uint32_t ODR;               // sorties
 };
+GpioRegs gpioSim{};                    // sur cible : reinterpret_cast<GpioRegs*>(0x40020000)
+GpioRegs* const GPIO = &gpioSim;
+constexpr uint32_t LED = 1u << 5;
 
-std::string etatToString(EtatNoeud e) {
-    switch(e) {
-        case EtatNoeud::Init: return "INIT";
-        case EtatNoeud::LectureCapteur: return "LECTURE_CAPTEUR";
-        case EtatNoeud::EnvoiDonnees: return "ENVOI_DONNEES";
-        case EtatNoeud::ModePanne: return "MODE_PANNE";
+volatile std::sig_atomic_t appui = 0;
+extern "C" void onBouton(int) { appui = 1; }   // « ISR » : une seule écriture
+
+std::atomic<bool> heartbeatAlive{true};
+
+void afficherBarrePWM(float pourcentage) {
+    int totalBars = 10;
+    int activeBars = static_cast<int>((pourcentage / 100.0f) * totalBars);
+    if (activeBars > totalBars) activeBars = totalBars;
+    if (activeBars < 0) activeBars = 0;
+
+    std::cout << "[";
+    for (int i = 0; i < totalBars; ++i) {
+        std::cout << (i < activeBars ? "#" : "-");
     }
-    return "INCONNU";
+    std::cout << "] " << static_cast<int>(pourcentage) << " %";
 }
 
 int main(int argc, char* argv[]) {
-
-    int panneDebut = -1;
-    int panneFin = -1;
-
+    int tickBlocage = -1;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--panne") {
-            if (i + 1 >= argc) {
-                std::cerr << "Erreur : --panne attend une valeur debut:fin\n";
-                return 1;
-            }
-            std::string valeur = argv[++i];
-            std::size_t pos = valeur.find(':');
-            if (pos == std::string::npos) {
-                std::cerr << "Erreur : format attendu debut:fin\n";
-                return 1;
-            }
-            try {
-                panneDebut = std::stoi(valeur.substr(0, pos));
-                panneFin = std::stoi(valeur.substr(pos + 1));
-            }
-            catch (const std::exception&) {
-                std::cerr << "Erreur : debut et fin doivent être des nombres\n";
-                return 1;
-            }
+        if (arg == "--bloquer-a" && i + 1 < argc) {
+            tickBlocage = std::stoi(argv[i + 1]);
         }
     }
 
-    EtatNoeud etatActuel = EtatNoeud::Init;
-    SimSensor capteur;
-    Mesure mesure;
+    struct sigaction sa{};
+    sa.sa_handler = onBouton;
+    sigaction(SIGUSR1, &sa, nullptr);
+
+    std::thread watchdog([]() {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            if (!heartbeatAlive) {
+                std::cerr << "[watchdog] aucun battement depuis 3 s : abort\n";
+                std::abort();
+            }
+            heartbeatAlive = false;
+        }
+    });
+    watchdog.detach();
+
     int tick = 0;
+    float temperatureSimulee = 25.0f; 
 
-    RingBuffer<Mesure, 64> historiqueMesures;
+    std::cout << "[t=" << tick << "] Noeud démarré (PID: " << getpid() << ")\n";
 
-    std::cout << "[TRANSITION] -> " << etatToString(etatActuel) << "\n";
-    if (capteur.begin()) {
-        etatActuel = EtatNoeud::LectureCapteur;
-        std::cout << "[TRANSITION] Init -> " << etatToString(etatActuel) << "\n";
-    }
-
-    while (tick < 10) {
+    for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         tick++;
-        std::cout << "\n--- Tick " << tick << " ---\n";
 
-        bool enPanne = (panneDebut != -1 && panneFin != -1 && tick >= panneDebut && tick <= panneFin);
-        capteur.injecterPanne(enPanne);
+        heartbeatAlive = true;
 
-        if (enPanne && etatActuel != EtatNoeud::ModePanne) {
-            etatActuel = EtatNoeud::ModePanne;
-            std::cout << "[TRANSITION] -> " << etatToString(etatActuel) << " (Panne injectée)\n";
-        } else if (!enPanne && etatActuel == EtatNoeud::ModePanne) {
-            etatActuel = EtatNoeud::LectureCapteur;
-            std::cout << "[TRANSITION] -> " << etatToString(etatActuel) << " (Retour à la normale)\n";
+        if (tickBlocage != -1 && tick >= tickBlocage) {
+            std::cout << "[t=" << tick << "] Simulation d'un blocage du noeud...\n";
+            while (true) { 
+                std::this_thread::sleep_for(std::chrono::seconds(1)); // Boucle infinie bloquante
+            }
         }
 
-        switch (etatActuel) {
-            case EtatNoeud::LectureCapteur: {
-                if (capteur.read(mesure)) {
-                    std::cout << "Capteur OK -> Temp: " << mesure.temp << "°C\n";
-                    etatActuel = EtatNoeud::EnvoiDonnees;
-                    std::cout << "[TRANSITION] LectureCapteur -> EnvoiDonnees\n";
-
-                    // TP3: Stockage de la mesure dans le buffer circulaire
-                    historiqueMesures.push(mesure);
-                    std::cout << "Mesure stockée. Taille du buffer : " << historiqueMesures.size() << "\n";
-                } else {
-                    std::cout << "Erreur de lecture du capteur !\n";
-                }
-                break;
-            }
-            case EtatNoeud::EnvoiDonnees: {
-                std::cout << "Envoi de la trame Modbus vers la passerelle...\n";
-                etatActuel = EtatNoeud::LectureCapteur;
-                std::cout << "[TRANSITION] EnvoiDonnees -> LectureCapteur\n";
-                break;
-            }
-            case EtatNoeud::ModePanne: {
-                std::cout << "Noeud en panne, aucune donnée envoyée\n";
-                break;
-            }
-            default:
-                break;
+        if (appui) {
+            appui = 0;
+            GPIO->ODR ^= LED;
         }
+
+        bool ledAllumee = (GPIO->ODR & LED) != 0;
+
+        if (ledAllumee) {
+            temperatureSimulee += 0.5f;
+        } else {
+            temperatureSimulee -= 0.5f; 
+        }
+
+        // Bornes strictes sans dépassement
+        if (temperatureSimulee > 50.0f) temperatureSimulee = 50.0f;
+        if (temperatureSimulee < 20.0f) temperatureSimulee = 20.0f;
+
+        /*temperatureSimulee += 0.5f;
+        if (temperatureSimulee > 50.0f) temperatureSimulee = 20.0f;
+*/
+        float pwmRapport = ((temperatureSimulee - 20.0f) / 30.0f) * 100.0f;
+        if (pwmRapport < 0.0f) pwmRapport = 0.0f;
+        if (pwmRapport > 100.0f) pwmRapport = 100.0f;
+
+        bool ledEtat = (GPIO->ODR & LED) != 0;
+        std::cout << "[t=" << tick << "] IRQ bouton -> LED " << (ledEtat ? "ON " : "OFF") << "  PWM ";
+        afficherBarrePWM(pwmRapport);
+        std::cout << "\n";
     }
 
     return 0;
