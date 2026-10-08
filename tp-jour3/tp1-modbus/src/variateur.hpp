@@ -37,7 +37,47 @@ public:
   std::optional<modbus::CodeException> ecrire(uint16_t a, uint16_t v) {
     using enum modbus::CodeException;   // C++20 : les énumérateurs sans préfixe
     // TODO C5 : CONSIGNE accepte 0 à VITESSE_MAX ; COMMANDE : 0 arrêt, 1 marche (refusé en défaut), 2 acquitter (refusé au-dessus de 60 °C) ; les autres registres sont en lecture seule
-    (void)a; (void)v; return AdresseIllegale;
+    switch (a) {
+        case CONSIGNE:
+            if (v > VITESSE_MAX) {
+                return ValeurIllegale;
+            }
+            consigne_ = v;
+            return std::nullopt;
+        case COMMANDE:
+            switch (v) {
+                case 0:
+                    // Arrêt du moteur
+                    marche_ = false;
+                    return std::nullopt;
+                case 1:
+                    // Mise en marche interdite si un défaut est présent
+                    if (defaut_) {
+                        return ValeurIllegale;
+                    }
+                    marche_ = true;
+                    return std::nullopt;
+                case 2:
+                    // Acquittement interdit au-dessus de 60 °C
+                    if (temperature_ > 60.0) {
+                        return ValeurIllegale;
+                    }
+
+                    defaut_ = false;
+                    return std::nullopt;
+
+                default:
+                    return ValeurIllegale;
+            }
+
+        case VITESSE:
+        case COURANT:
+        case TEMPERATURE:
+        case ETAT:
+            return AdresseIllegale;
+        default:  
+            return FonctionIllegale;
+    }
   }
 
   // Fait évoluer le moteur pendant dt secondes, par pas de 10 ms.

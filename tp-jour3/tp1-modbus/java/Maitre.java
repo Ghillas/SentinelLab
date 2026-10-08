@@ -24,13 +24,39 @@ public class Maitre {
     static int crc16(byte[] d, int n) {
         int crc = 0xFFFF;
         // TODO J1 : même algorithme que le C++ sans table : pour chaque octet, crc ^= octet (non signé), puis 8 décalages avec 0xA001
-        return crc;
+
+        for (int i = 0; i < n; i++) {
+            crc ^= Byte.toUnsignedInt(d[i]);
+
+            for (int j = 0; j < 8; j++) {
+                if ((crc & 1) != 0) {
+                    crc = (crc >>> 1) ^ 0xA001;
+                } else {
+                    crc >>>= 1;
+                }
+            }
+        }
+
+        return crc & 0xFFFF;
     }
 
     // ------------------------------------------------- construction (J2)
     static byte[] requete(int esclave, int fonction, int adresse, int valeur) {
         // TODO J2 : 6 octets en big-endian avec ByteBuffer, puis le CRC en little-endian (poids faible d'abord)
-        return new byte[8];
+        ByteBuffer buffer = ByteBuffer.allocate(8);
+
+        buffer.put((byte) esclave);
+        buffer.put((byte) fonction);
+        buffer.putShort((short) adresse);
+        buffer.putShort((short) valeur);
+
+        byte[] trame = buffer.array();
+
+        int crc = crc16(trame, 6);
+        trame[6] = (byte) (crc & 0xFF);
+        trame[7] = (byte) ((crc >>> 8) & 0xFF);
+
+        return trame;
     }
 
     // ------------------------------------------- réponses : type scellé (J3)
@@ -42,7 +68,77 @@ public class Maitre {
 
     static Reponse decoder(byte[] t, int adresseDemandee) {
         // TODO J3 : vérifier le CRC (CRC d'une trame complète = 0) ; bit 0x80 de la fonction -> Refus ; 0x03 -> Lecture ; 0x06 -> Ecriture
-        return new Corrompue("décodage à écrire");
+        
+        if (t == null || t.length < 4) {
+            return new Corrompue("trame invalide : trop courte");
+        }
+
+        if (crc16(t, t.length) != 0) {
+            return new Corrompue("CRC invalide");
+        }
+
+        int adresseEsclave = Byte.toUnsignedInt(t[0]);
+        int fonction = Byte.toUnsignedInt(t[1]);
+
+        if ((fonction & 0x80) != 0) {
+            if (t.length != 5) {
+                return new Corrompue("taille de réponse d'exception invalide");
+            }
+
+            int fonctionOriginale = fonction & 0x7F;
+            int code = Byte.toUnsignedInt(t[2]);
+
+            return new Refus(fonctionOriginale, code);
+        }
+
+        if (fonction == LIRE) {
+            if (t.length < 5) {
+                return new Corrompue("réponse de lecture trop courte");
+            }
+            int nombreOctets = Byte.toUnsignedInt(t[2]);
+
+            if ((nombreOctets % 2) != 0) {
+                return new Corrompue("nombre d'octets impair");
+            }
+            if (t.length != 3 + nombreOctets + 2) {
+                return new Corrompue("taille de réponse de lecture invalide");
+            }
+
+            int nombreRegistres = nombreOctets / 2;
+            int[] valeurs = new int[nombreRegistres];
+
+            for (int i = 0; i < nombreRegistres; i++) {
+                int position = 3 + i * 2;
+
+                int poidsFort = Byte.toUnsignedInt(t[position]);
+                int poidsFaible = Byte.toUnsignedInt(t[position + 1]);
+
+                valeurs[i] = (poidsFort << 8) | poidsFaible;
+            }
+
+            return new Lecture(adresseDemandee, valeurs);
+        }
+
+        if (fonction == ECRIRE) {
+
+            if (t.length != 8) {
+                return new Corrompue("taille de réponse d'écriture invalide");
+            }
+
+            int registre =
+                (Byte.toUnsignedInt(t[2]) << 8)
+                | Byte.toUnsignedInt(t[3]);
+
+            int valeur =
+                (Byte.toUnsignedInt(t[4]) << 8)
+                | Byte.toUnsignedInt(t[5]);
+
+            return new Ecriture(registre, valeur);
+        }
+
+        return new Corrompue(
+            "fonction inconnue : 0x" + Integer.toHexString(fonction)
+        );
     }
 
     static String nomException(int code) {
@@ -66,7 +162,57 @@ public class Maitre {
     // ------------------------------------------------------ affichage (J4)
     static void afficher(Reponse rep) {
         // TODO J4 : un switch exhaustif sur le type scellé, avec motifs de record ; un tableau complet si on a lu les 6 registres depuis 0
-        System.out.println(rep);
+        switch (rep) {
+            case Lecture(int adresse, int[] valeurs) -> {
+                System.out.printf(
+                    "Lecture à partir du registre %d (%d registre(s))%n",
+                    adresse,
+                    valeurs.length
+                );
+
+                if (adresse == 0 && valeurs.length == 6) {
+                    System.out.println("  Registres du variateur :");
+
+                    for (int i = 0; i < valeurs.length; i++) {
+                        System.out.printf(
+                            "    %-12s : %d%n",
+                            NOMS[i],
+                            valeurs[i]
+                        );
+                    }
+                } else {
+                    for (int i = 0; i < valeurs.length; i++) {
+                        System.out.printf(
+                            "  registre %d : %d%n",
+                            adresse + i,
+                            valeurs[i]
+                        );
+                    }
+                }
+            }
+
+            case Ecriture(int registre, int valeur) -> {
+                System.out.printf(
+                    "Écriture réussie : registre %d = %d%n",
+                    registre,
+                    valeur
+                );
+            }
+
+            case Refus(int fonction, int code) -> {
+                System.out.printf(
+                    "Refus de la fonction 0x%02X : %s%n",
+                    fonction,
+                    nomException(code)
+                );
+            }
+
+            case Corrompue(String raison) -> {
+                System.out.println(
+                    "Trame corrompue : " + raison
+                );
+            }
+        }
     }
 
     // ----------------------------------------------------------- transport

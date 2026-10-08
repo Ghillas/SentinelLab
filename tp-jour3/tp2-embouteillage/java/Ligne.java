@@ -37,7 +37,44 @@ public class Ligne {
         int numero = 0, n = 0;
         while (!fini) {
             // TODO V1 : obtenir une bouteille (créer si pas d'amont, sinon take()), travailler (sleep), la passer en aval (put) ou la compter au contrôle, puis toutes les tailleLot bouteilles attendre la barrière
-            break;
+            /*Bouteille b;
+            if (p.amont() == null) {
+                b = new Bouteille(++numero, lotCourant.get());
+            } else {
+                b = p.amont().take();
+            }
+
+            Thread.sleep(p.dureeMs());
+
+            if (p.aval() != null) {
+                p.aval().put(b);
+            }
+
+            p.traitees().incrementAndGet();
+
+            if (dansLot.incrementAndGet() == tailleLot) {
+                dansLot.set(0);
+                format.await();
+            }*/
+           Bouteille b;
+            if (p.amont() == null) {
+                b = new Bouteille(++numero, lotCourant.get());
+            } else {
+                b = p.amont().take();
+            }
+
+            Thread.sleep(p.dureeMs());
+
+            if (p.aval() != null) {
+                p.aval().put(b);
+            }
+
+            p.traitees().incrementAndGet();
+            n++;
+            if (n == tailleLot) {
+                n = 0;
+                format.await(); // Tous les postes se synchronisent ici à la fin de leur lot
+            }
         }
     }
 
@@ -52,7 +89,18 @@ public class Ligne {
                 new Poste("contrôle", 10, c.get(3), null));
         CountDownLatch pret = new CountDownLatch(postes.size());
         // TODO V2 : action de la barrière, exécutée une fois par lot : afficher le bilan, passer au lot suivant, positionner fini après le dernier lot
-        Runnable finDeLot = () -> fini = true;
+        Runnable finDeLot = () -> {
+            long ms = Duration.between(debutLot, Instant.now()).toMillis();
+            int currentLot = lotCourant.get();
+            System.out.printf("[lot %d] %d bouteilles en %d ms%n", currentLot, tailleLot, ms);
+            if (currentLot >= lots) {
+                fini = true;
+            } else {
+                lotCourant.incrementAndGet();
+                System.out.println("         changement de format...");
+            }
+            debutLot = Instant.now();
+        };
         CyclicBarrier format = new CyclicBarrier(postes.size(), finDeLot);
 
         Instant debut = Instant.now();
@@ -79,7 +127,11 @@ public class Ligne {
     static long chronometrer(ExecutorService ex, int n, Semaphore acces) {
         Instant t0 = Instant.now();
         // TODO V3 : soumettre n commandes à ex, attendre la fin de toutes (try-with-resources), renvoyer la durée en ms
-        ex.close();
+        try (ex) {
+            for (int i = 0; i < n; i++) {
+                ex.submit(() -> commande(acces));
+            }
+        }
         return Duration.between(t0, Instant.now()).toMillis();
     }
 

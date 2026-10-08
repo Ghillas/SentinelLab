@@ -80,6 +80,17 @@ void FinDeLot::operator()() noexcept {
   const auto ms = duration<double, std::milli>(Horloge::now() - l.debutLot).count();
   // TODO L2 : afficher le bilan du lot (numéro, bouteilles, durée, cadence en bouteilles/s), passer au lot suivant, et demander l'arrêt quand le dernier lot est fini
   l.debutLot = Horloge::now();
+  double cadence = n / (ms / 1000.0);
+  std::cout << std::format("[lot {}] {} bouteilles en {:.0f} ms, cadence {:.1f} b/s, rejets cumulés {}\n",
+                           l.lotCourant.load(), n, ms, cadence, l.rejets.load());
+  
+  if (l.lotCourant.load() >= l.opt.lots) {
+    l.arret.request_stop();
+  } else {
+    ++l.lotCourant;
+    std::cout << "  changement de format...\n";
+  }
+  l.debutLot = Horloge::now();
 }
 
 // Complète s par des espaces jusqu'à w caractères affichés (std::format compte ici
@@ -96,9 +107,15 @@ static int64_t us(Horloge::duration d) { return duration_cast<microseconds>(d).c
 void travailler(Poste& p, Ligne& l) {
   const std::stop_token st = l.arret.get_token();
   // TODO L3 : signaler que ce poste est prêt et attendre les autres (latch)
+  l.pret.arrive_and_wait();
+
   uint32_t dansLot = 0, numero = 0;
   while (!st.stop_requested()) {
     // TODO L4 : si la ligne est en pause, attendre sans consommer de CPU (atomic::wait)
+    while (l.enPause.load()) {
+      l.enPause.wait(true);
+    }
+
     Bouteille b;
     auto t0 = Horloge::now();
     if (p.amont) {
@@ -131,6 +148,7 @@ void travailler(Poste& p, Ligne& l) {
     }
   }
   // TODO L5 : en quittant, se retirer de la barrière pour ne pas bloquer les postes qui y attendent
+  l.changementFormat.arrive_and_drop();
 }
 
 // Console : pause, reprise, urgence, stats. Utilise le stop_token PROPRE du jthread.

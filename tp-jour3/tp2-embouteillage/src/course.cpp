@@ -33,10 +33,13 @@ int main() {
   // 2) std::atomic_ref (C++20) : opérations atomiques sur un int ordinaire.
   int b = 0;
   // TODO R1 : incrémenter b de façon atomique avec std::atomic_ref<int>(b).fetch_add
+  mesurer("atomic_ref", [&] { std::atomic_ref<int>(b).fetch_add(1); }, b);
 
   // 3) Section critique protégée par un mutex.
   int c = 0;
   std::mutex m;
   // TODO R2 : incrémenter c sous la protection d'un std::scoped_lock sur m
+  mesurer("mutex", [&] {std::scoped_lock lock(m); ++c;}, c);
+
   return 0;
 }

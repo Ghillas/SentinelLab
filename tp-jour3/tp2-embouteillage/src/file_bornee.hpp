@@ -29,12 +29,29 @@ public:
   // Dépose v ; bloque tant que la file est pleine. false si l'arrêt est demandé.
   bool deposer(const T& v, std::stop_token st) {
     // TODO L1 : prendre une place libre (acquerir), écrire sous verrou à l'indice queue_, puis libérer un « présent »
-    (void)v; (void)st; return false;
+    if (!acquerir(places_, st)) return false;
+    {
+      std::lock_guard<std::mutex> lock(verrou_);
+      buf_[queue_] = v;
+      queue_ = (queue_ + 1) % N;
+    }
+
+    presents_.release();
+    return true;
   }
 
   // Retire l'élément le plus ancien ; bloque tant que la file est vide.
   std::optional<T> retirer(std::stop_token st) {
     // TODO L1 : prendre un « présent », lire sous verrou à l'indice tete_, puis libérer une place
-    (void)st; return std::nullopt;
+    if (!acquerir(presents_, st)) return std::nullopt;
+
+    T v;
+    {
+      std::lock_guard<std::mutex> lock(verrou_);
+      v = buf_[tete_];
+      tete_ = (tete_ + 1) % N;
+    }
+    places_.release();
+    return v;
   }
 };

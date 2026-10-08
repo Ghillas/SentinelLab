@@ -38,6 +38,8 @@ constexpr uint16_t crc16(std::span<const uint8_t> octets) {
 }
 
 // TODO C2 : vérifier À LA COMPILATION l'exemple de la spécification : 01 03 00 00 00 0A -> CRC 0xCDC5 (octets C5 CD)
-static_assert(crc16({0x01, 0x03, 0x00, 0x00, 0x00, 0x0A}) == 0xCDC5);
+static_assert(crc16(std::array<uint8_t, 6>{
+        0x01, 0x03, 0x00, 0x00, 0x00, 0x0A
+    }) == 0xCDC5);
 
 }  // namespace modbus
