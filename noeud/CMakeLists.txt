@@ -7,9 +7,15 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+option(ENABLE_SANITIZERS "Activer AddressSanitizer et UndefinedSanitizer" ON)
+
 set(AVERTISSEMENTS -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
 
 add_executable(noeud main.cpp)
 
-target_compile_options(noeud PRIVATE ${AVERTISSEMENTS} -fstack-usage)
+target_compile_options(noeud PRIVATE ${AVERTISSEMENTS} -fstack-usage -g)
 
+if(ENABLE_SANITIZERS)
+  target_compile_options(noeud PRIVATE -fsanitize=address,undefined)
+  target_link_options(noeud PRIVATE -fsanitize=address,undefined)
+endif()

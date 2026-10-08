@@ -1,5 +1,7 @@
 package com.passerelle;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 
 public class Passerelle {
@@ -28,5 +30,27 @@ public class Passerelle {
         
         Mesure m = new Mesure(21.5f, 40.0f, 1013.2f, System.currentTimeMillis());
         System.out.println("Mesure reçue : " + m);
+
+
+        //=================================================== TP3
+        int nbMesures = 100000;
+
+        System.out.println("Test avec ArrayList<Double>");
+        long debut1 = System.currentTimeMillis();
+        List<Double> list = new ArrayList<>(nbMesures);
+        for (int i = 0; i < nbMesures; i++) {
+            list.add(20.5 + i * 0.001);
+        }
+        long fin1 = System.currentTimeMillis();
+        System.out.println("Temps ArrayList : " + (fin1 - debut1) + " ms");
+
+        System.out.println("Test avec double[]");
+        long debut2 = System.currentTimeMillis();
+        double[] array = new double[nbMesures];
+        for (int i = 0; i < nbMesures; i++) {
+            array[i] = 20.5 + i * 0.001;
+        }
+        long fin2 = System.currentTimeMillis();
+        System.out.println("Temps double[] : " + (fin2 - debut2) + " ms");
     }
 }

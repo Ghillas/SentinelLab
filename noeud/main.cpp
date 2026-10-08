@@ -4,6 +4,9 @@
 #include <string>
 #include <cstdlib>
 #include "sim_sensor.hpp"
+#include "ring_buffer.hpp"
+
+
 
 enum class EtatNoeud {
     Init,
@@ -23,6 +26,7 @@ std::string etatToString(EtatNoeud e) {
 }
 
 int main(int argc, char* argv[]) {
+
     int panneDebut = -1;
     int panneFin = -1;
 
@@ -55,6 +59,8 @@ int main(int argc, char* argv[]) {
     Mesure mesure;
     int tick = 0;
 
+    RingBuffer<Mesure, 64> historiqueMesures;
+
     std::cout << "[TRANSITION] -> " << etatToString(etatActuel) << "\n";
     if (capteur.begin()) {
         etatActuel = EtatNoeud::LectureCapteur;
@@ -83,6 +89,10 @@ int main(int argc, char* argv[]) {
                     std::cout << "Capteur OK -> Temp: " << mesure.temp << "°C\n";
                     etatActuel = EtatNoeud::EnvoiDonnees;
                     std::cout << "[TRANSITION] LectureCapteur -> EnvoiDonnees\n";
+
+                    // TP3: Stockage de la mesure dans le buffer circulaire
+                    historiqueMesures.push(mesure);
+                    std::cout << "Mesure stockée. Taille du buffer : " << historiqueMesures.size() << "\n";
                 } else {
                     std::cout << "Erreur de lecture du capteur !\n";
                 }
