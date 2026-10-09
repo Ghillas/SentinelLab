@@ -15,7 +15,6 @@ public class Passerelle {
     private static int rejectedFrames = 0;
     private static int resyncCount = 0;
 
-
     // Méthode pour lire l'utilisation mémoire RSS : TP4
     private static void lireVmRSS() {
         try (BufferedReader reader = new BufferedReader(new FileReader("/proc/self/status"))) {
@@ -31,7 +30,7 @@ public class Passerelle {
         }
     }
 
-    // ================================================= TP5
+    // Calcul CRC8 : TP5
     private static int calculerCRC8(byte[] data, int offset, int length) {
         int crc = 0x00;
         for (int i = offset; i < offset + length; i++) {
@@ -47,90 +46,67 @@ public class Passerelle {
         return crc;
     }
 
-
     public static void main(String[] args) {
+
         // ================================================== TP1
+
         /*Scanner scanner = new Scanner(System.in);
-        System.out.println("Entrez deux octets hexadécimaux :");
-
-        if (scanner.hasNext()) {
-            String highHex = scanner.next();
-            String lowHex = scanner.hasNext() ? scanner.next() : "00";
-
-            int high = Integer.parseInt(highHex, 16);
-            int low = Integer.parseInt(lowHex, 16);
-
-            int valeur16bits = (high << 8) | low;
-
-            System.out.println("Valeur 16 bits décimale : " + valeur16bits);
+        System.out.println("[TP1] Test conversion 16 bits");
+        if (scanner.hasNextLine() && scanner.hasNext()) {
+            try {
+                String highHex = scanner.next();
+                String lowHex = scanner.hasNext() ? scanner.next() : "00";
+                int high = Integer.parseInt(highHex, 16);
+                int low = Integer.parseInt(lowHex, 16);
+                int valeur16bits = (high << 8) | low;
+                System.out.println("[TP1] Valeur 16 bits décimale : " + valeur16bits);
+            } catch (Exception ignored) {}
         }
-        scanner.close();*/
-
-
+*/
         // ================================================== TP2
-        /*EtatPasserelle etat = EtatPasserelle.ECOUTE;
-        System.out.println("Passerelle démarrée. État : " + etat);
+        //System.out.println("[TP2] Initialisation des structures de données (Mesure / États)...");
         
-        Mesure m = new Mesure(21.5f, 40.0f, 1013.2f, System.currentTimeMillis());
-        System.out.println("Mesure reçue : " + m);*/
+        // Mesure m = new Mesure(21.5f, 40.0f, 1013.2f, System.currentTimeMillis());
 
+        // ================================================== TP3 (Benchmark ArrayList vs double[])
+        int nbMesures = 100_000;
+        System.out.println("[TP3] Comparaison performances mémoire (" + nbMesures + " éléments) :");
 
-        //=================================================== TP3
-        /*int nbMesures = 100000;
-
-        System.out.println("Test avec ArrayList<Double>");
         long debut1 = System.currentTimeMillis();
         List<Double> list = new ArrayList<>(nbMesures);
         for (int i = 0; i < nbMesures; i++) {
-            list.add(20.5 + i * 0.001);
+            list.add(20.5 + i * 0.001); // Correction de l'opérateur manquant
         }
         long fin1 = System.currentTimeMillis();
-        System.out.println("Temps ArrayList : " + (fin1 - debut1) + " ms");
+        System.out.println("  Temps ArrayList : " + (fin1 - debut1) + " ms");
 
-        System.out.println("Test avec double[]");
         long debut2 = System.currentTimeMillis();
         double[] array = new double[nbMesures];
         for (int i = 0; i < nbMesures; i++) {
             array[i] = 20.5 + i * 0.001;
         }
         long fin2 = System.currentTimeMillis();
-        System.out.println("Temps double[] : " + (fin2 - debut2) + " ms");*/
-    
+        System.out.println("  Temps double[]  : " + (fin2 - debut2) + " ms");
 
-
-    //================================================================ TP4
-
-        /*Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("\n[Passerelle] Arrêt détecté, nettoyage et bilan mémoire :");
-            lireVmRSS();
-        }));
-
-        System.out.println("Passerelle Java active. En attente de trames... (Appuyez sur Ctrl+C pour quitter)");
-
-        // Boucle de simulation de la passerelle
-        try {
-            while (true) {
-                Thread.sleep(2000);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }*/
-
-        //================================================================ TP5
-
-
+        // ================================================== TP4 & TP5 : Shutdown Hook Unique
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("\ntrames valides : " + validFrames + 
-                               "   rejetées (CRC) : " + rejectedFrames + 
-                               "   resynchronisations : " + resyncCount);
+            System.out.println("\n--- [Passerelle] Arrêt détecté (Bilan final) ---");
+            System.out.println("Trames valides      : " + validFrames);
+            System.out.println("Trames rejetées(CRC): " + rejectedFrames);
+            System.out.println("Resynchronisations  : " + resyncCount);
+            lireVmRSS(); 
         }));
+
+        // ================================================== TP5 : Boucle principale de réception binaire
+        System.out.println("\n[TP5] Passerelle active. En attente de flux binaire (0xAA)...");
 
         try {
             byte[] frame = new byte[6];
             while (true) {
                 int b = System.in.read();
-                if (b == -1) break;
+                if (b == -1) break; 
 
+                // Resynchronisation sur l'octet magique 0xAA (TP5)
                 if ((b & 0xFF) == 0xAA) {
                     frame[0] = (byte) b;
                     int lues = System.in.readNBytes(frame, 1, 5);
@@ -141,6 +117,9 @@ public class Passerelle {
 
                     if (crcRecu == crcCalcule) {
                         validFrames++;
+                        // Extraction de la température (4 premiers octets du payload, little/big endian selon le C++)
+                        float temp = ByteBuffer.wrap(frame, 1, 4).order(ByteOrder.LITTLE_ENDIAN).getFloat();
+                        System.out.printf("[Reçu] Température : %.2f °C (CRC OK)%n", temp);
                     } else {
                         rejectedFrames++;
                     }
@@ -149,10 +128,8 @@ public class Passerelle {
                 }
             }
         } catch (IOException e) {
-            System.err.println("Erreur de lecture : " + e.getMessage());
+            System.err.println("Erreur de lecture du flux : " + e.getMessage());
         }
-
-        System.out.println("trames valides : " + validFrames + ", rejetées (CRC) : " + rejectedFrames + ", resynchronisations : " + resyncCount);
     }
-    
 }
+
